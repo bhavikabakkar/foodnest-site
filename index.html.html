@@ -1,0 +1,642 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FoodNest - Recipe Sharing Community</title>
+
+<style>
+/* ===== COLOURS: deep red, yellow, white ===== */
+:root { --red:#8b1a1a; --red-dark:#6a1010; --yellow:#f5b700; --white:#ffffff; --light:#fff8e6; --text:#2b2b2b; }
+
+* { box-sizing: border-box; }
+body { margin:0; font-family: Arial, sans-serif; background: var(--light); color: var(--text); }
+
+/* Top bar */
+header { background: var(--red); color: var(--white); padding: 12px 20px; display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:10px; }
+header h1 { margin:0; font-size:28px; color: var(--yellow); }
+nav button { background:none; border:2px solid transparent; color:white; padding:6px 12px; cursor:pointer; border-radius:5px; font-size:15px; }
+nav button:hover, nav button.active { border-color: var(--yellow); color: var(--yellow); }
+
+main { max-width: 1000px; margin: 20px auto; padding: 0 15px; }
+h2 { color: var(--red); }
+
+/* Boxes, forms, buttons */
+.box { background: var(--white); border:1px solid #ecd9a8; border-radius:8px; padding:16px; margin-bottom:16px; }
+label { display:block; margin-top:10px; font-weight:bold; }
+input, select, textarea { width:100%; padding:8px; border:1px solid #bbb; border-radius:5px; font-size:15px; }
+button.btn { background: var(--red); color:white; border:none; padding:8px 14px; border-radius:5px; cursor:pointer; font-size:15px; }
+button.btn:hover { background: var(--red-dark); }
+button.yellow { background: var(--yellow); color:#222; }
+button.yellow:hover { background:#d9a000; }
+button.small { padding:4px 10px; font-size:13px; }
+.error { color: #c00; font-size:14px; min-height:18px; }
+.muted { color:#777; font-size:14px; }
+
+/* Login / register box */
+.auth-box { max-width: 380px; margin: 40px auto; }
+
+/* Search bar */
+.toolbar { display:flex; flex-wrap:wrap; gap:10px; margin-bottom:16px; }
+.toolbar input, .toolbar select { flex:1; min-width:150px; }
+
+/* Recipe cards */
+.cards { display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:16px; }
+.card { background:white; border-top:6px solid var(--yellow); border-radius:8px; padding:14px; border-left:1px solid #ecd9a8; border-right:1px solid #ecd9a8; border-bottom:1px solid #ecd9a8; }
+.card h3 { margin:0 0 6px; color: var(--red); }
+.tag { background: var(--yellow); border-radius:12px; padding:2px 10px; font-size:12px; font-weight:bold; }
+.lines { white-space: pre-line; margin: 4px 0 10px; }
+
+/* Tables */
+table { width:100%; border-collapse: collapse; background:white; }
+th { background: var(--red); color:white; text-align:left; }
+th, td { padding:8px; border-bottom:1px solid #eee; }
+.table-wrap { overflow-x:auto; }
+
+/* Dashboard numbers */
+.stats { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr)); gap:12px; margin-bottom:16px; }
+.stat { background: var(--red); color:white; padding:16px; border-radius:8px; text-align:center; }
+.stat b { display:block; font-size:32px; color: var(--yellow); }
+
+/* Bars in reports */
+.bar-row { display:flex; align-items:center; gap:8px; margin:6px 0; }
+.bar-row .label { width:90px; }
+.bar-row .bar { background: var(--yellow); height:16px; border-radius:4px; }
+
+/* Request status colours */
+.status { padding:2px 10px; border-radius:12px; font-size:13px; font-weight:bold; }
+.Pending { background:#ffe9a8; } .Approved { background:#cdeccd; } .Rejected { background:#f5c6c6; }
+
+dialog { border:none; border-radius:8px; padding:20px; width: min(500px, 94vw); }
+dialog::backdrop { background: rgba(0,0,0,0.5); }
+
+@media print { header, button, .toolbar { display:none; } }
+</style>
+</head>
+
+<body>
+<header>
+  <h1>🍽️ FoodNest</h1>
+  <nav id="nav"></nav>
+</header>
+
+<main id="app"></main>
+<dialog id="popup"></dialog>
+
+<script>
+/* =====================================================
+   FOODNEST - beginner friendly JavaScript
+   Data is saved in the browser using localStorage.
+   Sections: 1 Data | 2 Helpers | 3 Navigation | 4 Login/Register
+             5 Recipes | 6 Requests | 7 Admin pages
+   ===================================================== */
+
+/* ---------- 1. DATA ---------- */
+var categories = ["Breakfast", "Lunch", "Dinner", "Snack", "Dessert", "Drink"];
+var cuisines = ["Indian", "Italian", "Chinese", "Mexican", "American", "Other"];
+
+// Groups a recipe by how long it takes to make
+var timeGroups = ["Quick (under 15 min)", "Medium (15-30 min)", "Long (31-60 min)", "Very long (over 60 min)"];
+function timeGroup(minutes) {
+  if (minutes < 15) return timeGroups[0];
+  if (minutes <= 30) return timeGroups[1];
+  if (minutes <= 60) return timeGroups[2];
+  return timeGroups[3];
+}
+
+// Load saved data, or start with some default data the first time
+// Safe loading: if the browser blocks localStorage, the page still opens
+function loadData() {
+  try { return JSON.parse(localStorage.getItem("foodnest")); }
+  catch (e) { return null; }
+}
+
+var warned = false;
+var db = loadData() || {
+  users: [
+    { id: 1, name: "Admin", email: "admin@foodnest.com", password: "admin123", role: "admin" }
+  ],
+  recipes: [
+    { id: 1, title: "Masala Maggi", category: "Snack", cuisine: "Indian", time: 10,
+      ingredients: "Maggi noodles\nOnion\nTomato\nMasala",
+      steps: "Boil the noodles.\nCook onion and tomato.\nMix everything with masala.", userId: 1 }
+  ],
+  requests: [],
+  loggedIn: null,   // id of the user who is logged in
+  nextId: 100       // used to give new items a unique id
+};
+
+var currentPage = "login";
+var search = "";
+var filterCategory = "";
+var filterCuisine = "";
+var filterTime = "";
+
+// Old saved recipes (without a cuisine) get "Other"
+for (var m = 0; m < db.recipes.length; m++) {
+  if (!db.recipes[m].cuisine) db.recipes[m].cuisine = "Other";
+}
+
+function saveData() {
+  try {
+    localStorage.setItem("foodnest", JSON.stringify(db));
+  } catch (e) {
+    // Browser is blocking storage: warn once, the app keeps working until refresh
+    if (!warned) {
+      warned = true;
+      alert("Your browser is blocking storage, so data will be lost when you refresh. Open this file in Chrome or Edge.");
+    }
+  }
+}
+
+/* ---------- 2. HELPERS ---------- */
+function newId() {
+  db.nextId = db.nextId + 1;
+  return db.nextId;
+}
+
+function getUser() {
+  // returns the logged-in user (or undefined)
+  return db.users.find(function (u) { return u.id === db.loggedIn; });
+}
+
+function isAdmin() {
+  var u = getUser();
+  return u && u.role === "admin";
+}
+
+function userName(id) {
+  var u = db.users.find(function (x) { return x.id === id; });
+  return u ? u.name : "Deleted user";
+}
+
+// Stops text typed by users from breaking the page
+function safe(text) {
+  var d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+// Makes <option> tags from a list. firstLabel adds an "All" option at the top (use null to skip it)
+function makeOptions(list, selected, firstLabel) {
+  var html = (firstLabel !== null) ? '<option value="">' + firstLabel + '</option>' : "";
+  for (var i = 0; i < list.length; i++) {
+    var sel = (list[i] === selected) ? "selected" : "";
+    html += '<option ' + sel + '>' + list[i] + '</option>';
+  }
+  return html;
+}
+
+// Average cooking time of a list of recipes
+function averageTime(list) {
+  if (list.length === 0) return "-";
+  var total = 0;
+  for (var i = 0; i < list.length; i++) total += list[i].time;
+  return Math.round(total / list.length) + " min";
+}
+
+function countWhere(list, fn) {
+  return list.filter(fn).length;
+}
+
+/* ---------- 3. NAVIGATION ---------- */
+function goTo(page) {
+  currentPage = page;
+  draw();
+}
+
+function drawNav() {
+  var nav = document.getElementById("nav");
+  var user = getUser();
+  if (!user) { nav.innerHTML = ""; return; }
+
+  var links;
+  if (user.role === "admin") {
+    links = [["dashboard", "Dashboard"], ["recipes", "Recipes"], ["users", "Manage Users"],
+             ["manageRequests", "Manage Requests"], ["reports", "Reports"]];
+  } else {
+    links = [["recipes", "Recipes"], ["requests", "My Requests"]];
+  }
+
+  var html = "";
+  for (var i = 0; i < links.length; i++) {
+    var cls = (links[i][0] === currentPage) ? "active" : "";
+    html += '<button class="' + cls + '" onclick="goTo(\'' + links[i][0] + '\')">' + links[i][1] + '</button>';
+  }
+  html += '<button onclick="logout()">Logout (' + safe(user.name) + ')</button>';
+  nav.innerHTML = html;
+}
+
+function draw() {
+  drawNav();
+  var app = document.getElementById("app");
+
+  // Not logged in -> only login/register pages
+  if (!getUser()) {
+    if (currentPage === "register") showRegister(); else showLogin();
+    return;
+  }
+
+  // Role-based access: users cannot open admin pages
+  var adminPages = ["dashboard", "users", "manageRequests", "reports"];
+  if (adminPages.indexOf(currentPage) !== -1 && !isAdmin()) currentPage = "recipes";
+  if (currentPage === "login" || currentPage === "register") currentPage = isAdmin() ? "dashboard" : "recipes";
+
+  if (currentPage === "recipes") showRecipes();
+  else if (currentPage === "requests") showMyRequests();
+  else if (currentPage === "dashboard") showDashboard();
+  else if (currentPage === "users") showUsers();
+  else if (currentPage === "manageRequests") showManageRequests();
+  else if (currentPage === "reports") showReports();
+}
+
+/* ---------- 4. LOGIN & REGISTER ---------- */
+function showLogin() {
+  document.getElementById("app").innerHTML =
+    '<div class="box auth-box">' +
+    '<h2>Login to FoodNest</h2>' +
+    '<label>Email</label><input id="loginEmail" type="email">' +
+    '<label>Password</label><input id="loginPass" type="password">' +
+    '<p class="error" id="loginError"></p>' +
+    '<button class="btn yellow" onclick="doLogin()">Login</button> ' +
+    '<button class="btn" onclick="goTo(\'register\')">Create account</button>' +
+    '<p class="muted">Admin demo: admin@foodnest.com / admin123</p>' +
+    '</div>';
+}
+
+function doLogin() {
+  var email = document.getElementById("loginEmail").value.trim().toLowerCase();
+  var pass = document.getElementById("loginPass").value;
+  var error = document.getElementById("loginError");
+
+  if (email === "" || pass === "") { error.textContent = "Please fill in both fields."; return; }
+
+  var found = db.users.find(function (u) { return u.email === email && u.password === pass; });
+  if (!found) { error.textContent = "Wrong email or password."; return; }
+
+  db.loggedIn = found.id;
+  saveData();
+  currentPage = (found.role === "admin") ? "dashboard" : "recipes";
+  draw();
+}
+
+function showRegister() {
+  document.getElementById("app").innerHTML =
+    '<div class="box auth-box">' +
+    '<h2>Create your account</h2>' +
+    '<label>Name</label><input id="regName">' +
+    '<label>Email</label><input id="regEmail" type="email">' +
+    '<label>Password (min 6 characters)</label><input id="regPass" type="password">' +
+    '<label>Confirm password</label><input id="regPass2" type="password">' +
+    '<p class="error" id="regError"></p>' +
+    '<button class="btn yellow" onclick="doRegister()">Register</button> ' +
+    '<button class="btn" onclick="goTo(\'login\')">Back to login</button>' +
+    '</div>';
+}
+
+function doRegister() {
+  var name = document.getElementById("regName").value.trim();
+  var email = document.getElementById("regEmail").value.trim().toLowerCase();
+  var pass = document.getElementById("regPass").value;
+  var pass2 = document.getElementById("regPass2").value;
+  var error = document.getElementById("regError");
+
+  if (name.length < 2) { error.textContent = "Name must have at least 2 letters."; return; }
+  if (email.indexOf("@") === -1 || email.indexOf(".") === -1) { error.textContent = "Enter a valid email."; return; }
+  if (pass.length < 6) { error.textContent = "Password must have at least 6 characters."; return; }
+  if (pass !== pass2) { error.textContent = "Passwords do not match."; return; }
+  if (db.users.some(function (u) { return u.email === email; })) { error.textContent = "This email is already registered."; return; }
+
+  var user = { id: newId(), name: name, email: email, password: pass, role: "user" };
+  db.users.push(user);
+  db.loggedIn = user.id;
+  saveData();
+  currentPage = "recipes";
+  draw();
+}
+
+function logout() {
+  db.loggedIn = null;
+  saveData();
+  currentPage = "login";
+  draw();
+}
+
+/* ---------- 5. RECIPES (add, view, edit, delete, search, filter) ---------- */
+function showRecipes() {
+  var options = '<option value="">All categories</option>';
+  for (var i = 0; i < categories.length; i++) {
+    var sel = (categories[i] === filterCategory) ? "selected" : "";
+    options += '<option ' + sel + '>' + categories[i] + '</option>';
+  }
+
+  document.getElementById("app").innerHTML =
+    '<h2>Recipes</h2>' +
+    '<div class="toolbar">' +
+    '<input id="searchBox" placeholder="Search name, ingredient or cuisine" value="' + safe(search) + '" oninput="onSearch()">' +
+    '<select id="catBox" onchange="onFilter()">' + options + '</select>' +
+    '<select id="cuisineBox" onchange="onFilter()">' + makeOptions(cuisines, filterCuisine, "All cuisines") + '</select>' +
+    '<select id="timeBox" onchange="onFilter()">' + makeOptions(timeGroups, filterTime, "Any cooking time") + '</select>' +
+    '<button class="btn yellow" onclick="openRecipeForm(0)">+ Add Recipe</button>' +
+    '</div>' +
+    '<div class="cards" id="recipeList"></div>';
+  drawRecipeCards();
+}
+
+function onSearch() {
+  search = document.getElementById("searchBox").value;
+  drawRecipeCards();   // only redraw the cards so typing is not interrupted
+}
+
+function onFilter() {
+  filterCategory = document.getElementById("catBox").value;
+  filterCuisine = document.getElementById("cuisineBox").value;
+  filterTime = document.getElementById("timeBox").value;
+  drawRecipeCards();
+}
+
+function drawRecipeCards() {
+  var html = "";
+  var found = 0;
+  var text = search.toLowerCase();
+
+  for (var i = 0; i < db.recipes.length; i++) {
+    var r = db.recipes[i];
+    var matchText = (r.title + " " + r.ingredients + " " + r.cuisine).toLowerCase().indexOf(text) !== -1;
+    var matchCat = (filterCategory === "" || r.category === filterCategory);
+    var matchCuisine = (filterCuisine === "" || r.cuisine === filterCuisine);
+    var matchTime = (filterTime === "" || timeGroup(r.time) === filterTime);
+    if (!matchText || !matchCat || !matchCuisine || !matchTime) continue;
+    found++;
+
+    // Owner can edit/delete own recipes. Admin can edit/delete all.
+    var buttons = "";
+    if (r.userId === db.loggedIn || isAdmin()) {
+      buttons = '<button class="btn small yellow" onclick="openRecipeForm(' + r.id + ')">Edit</button> ' +
+                '<button class="btn small" onclick="deleteRecipe(' + r.id + ')">Delete</button>';
+    }
+
+    html += '<div class="card">' +
+      '<h3>' + safe(r.title) + '</h3>' +
+      '<span class="tag">' + r.category + '</span> <span class="tag">' + r.cuisine + '</span>' +
+      '<p class="muted">' + r.time + ' min (' + timeGroup(r.time) + ') | by ' + safe(userName(r.userId)) + '</p>' +
+      '<p><b>Ingredients</b></p><div class="lines">' + safe(r.ingredients) + '</div>' +
+      '<p><b>Steps</b></p><div class="lines">' + safe(r.steps) + '</div>' +
+      buttons + '</div>';
+  }
+
+  if (found === 0) html = '<p class="muted">No recipes found. Try a different search or add one!</p>';
+  document.getElementById("recipeList").innerHTML = html;
+}
+
+// id = 0 means "add new", otherwise "edit that recipe"
+function openRecipeForm(id) {
+  var r = db.recipes.find(function (x) { return x.id === id; });
+  if (!r) r = { title: "", category: "Dinner", cuisine: "Indian", time: "", ingredients: "", steps: "" };
+
+  var options = "";
+  for (var i = 0; i < categories.length; i++) {
+    var sel = (categories[i] === r.category) ? "selected" : "";
+    options += '<option ' + sel + '>' + categories[i] + '</option>';
+  }
+
+  var popup = document.getElementById("popup");
+  popup.innerHTML =
+    '<h2>' + (id ? "Edit Recipe" : "Add Recipe") + '</h2>' +
+    '<label>Title</label><input id="rTitle" value="' + safe(r.title).replace(/"/g, "&quot;") + '">' +
+    '<label>Category</label><select id="rCat">' + options + '</select>' +
+    '<label>Cuisine (country)</label><select id="rCuisine">' + makeOptions(cuisines, r.cuisine, null) + '</select>' +
+    '<label>Cooking time (minutes)</label><input id="rTime" type="number" value="' + r.time + '">' +
+    '<label>Ingredients (one per line)</label><textarea id="rIng" rows="4">' + safe(r.ingredients) + '</textarea>' +
+    '<label>Steps</label><textarea id="rSteps" rows="4">' + safe(r.steps) + '</textarea>' +
+    '<p class="error" id="rError"></p>' +
+    '<button class="btn yellow" onclick="saveRecipe(' + id + ')">Save</button> ' +
+    '<button class="btn" onclick="document.getElementById(\'popup\').close()">Cancel</button>';
+  popup.showModal();
+}
+
+function saveRecipe(id) {
+  var title = document.getElementById("rTitle").value.trim();
+  var category = document.getElementById("rCat").value;
+  var cuisine = document.getElementById("rCuisine").value;
+  var time = Number(document.getElementById("rTime").value);
+  var ingredients = document.getElementById("rIng").value.trim();
+  var steps = document.getElementById("rSteps").value.trim();
+  var error = document.getElementById("rError");
+
+  // Validation
+  if (title.length < 3) { error.textContent = "Title must have at least 3 letters."; return; }
+  if (time < 1 || time > 1440) { error.textContent = "Enter cooking time between 1 and 1440 minutes."; return; }
+  if (ingredients.split("\n").length < 2) { error.textContent = "Add at least 2 ingredients (one per line)."; return; }
+  if (steps.length < 10) { error.textContent = "Please write the steps (at least 10 characters)."; return; }
+
+  if (id === 0) {
+    db.recipes.push({ id: newId(), title: title, category: category, cuisine: cuisine, time: time,
+                      ingredients: ingredients, steps: steps, userId: db.loggedIn });
+  } else {
+    var r = db.recipes.find(function (x) { return x.id === id; });
+    r.title = title; r.category = category; r.cuisine = cuisine; r.time = time;
+    r.ingredients = ingredients; r.steps = steps;
+  }
+  saveData();
+  document.getElementById("popup").close();
+  showRecipes();
+}
+
+function deleteRecipe(id) {
+  if (!confirm("Are you sure you want to delete this recipe?")) return;
+  db.recipes = db.recipes.filter(function (r) { return r.id !== id; });
+  saveData();
+  showRecipes();
+}
+
+/* ---------- 6. RECIPE REQUESTS (user side) ---------- */
+function showMyRequests() {
+  var html =
+    '<h2>Request a Recipe</h2>' +
+    '<div class="box">' +
+    '<label>Which dish do you want?</label><input id="reqDish" placeholder="e.g. Chicken biryani">' +
+    '<label>Notes (optional)</label><input id="reqNotes" placeholder="e.g. less spicy">' +
+    '<p class="error" id="reqError"></p>' +
+    '<button class="btn yellow" onclick="sendRequest()">Send Request</button>' +
+    '</div>' +
+    '<h2>My Requests</h2>';
+
+  var mine = db.requests.filter(function (r) { return r.userId === db.loggedIn; });
+  if (mine.length === 0) html += '<p class="muted">You have not made any requests yet.</p>';
+  else {
+    html += '<div class="table-wrap"><table><tr><th>Dish</th><th>Notes</th><th>Status</th><th></th></tr>';
+    for (var i = 0; i < mine.length; i++) {
+      var r = mine[i];
+      var cancel = (r.status === "Pending") ? '<button class="btn small" onclick="cancelRequest(' + r.id + ')">Cancel</button>' : "";
+      html += '<tr><td>' + safe(r.dish) + '</td><td>' + safe(r.notes || "-") + '</td>' +
+              '<td><span class="status ' + r.status + '">' + r.status + '</span></td><td>' + cancel + '</td></tr>';
+    }
+    html += '</table></div>';
+  }
+  document.getElementById("app").innerHTML = html;
+}
+
+function sendRequest() {
+  var dish = document.getElementById("reqDish").value.trim();
+  var notes = document.getElementById("reqNotes").value.trim();
+  var error = document.getElementById("reqError");
+
+  if (dish.length < 3) { error.textContent = "Dish name must have at least 3 letters."; return; }
+
+  var same = db.requests.some(function (r) {
+    return r.userId === db.loggedIn && r.dish.toLowerCase() === dish.toLowerCase() && r.status === "Pending";
+  });
+  if (same) { error.textContent = "You already requested this dish."; return; }
+
+  db.requests.push({ id: newId(), userId: db.loggedIn, dish: dish, notes: notes, status: "Pending" });
+  saveData();
+  showMyRequests();
+}
+
+function cancelRequest(id) {
+  db.requests = db.requests.filter(function (r) { return r.id !== id; });
+  saveData();
+  showMyRequests();
+}
+
+/* ---------- 7. ADMIN PAGES ---------- */
+function showDashboard() {
+  var pending = countWhere(db.requests, function (r) { return r.status === "Pending"; });
+  document.getElementById("app").innerHTML =
+    '<h2>Admin Dashboard</h2>' +
+    '<div class="stats">' +
+    '<div class="stat"><b>' + db.users.length + '</b>Total Users</div>' +
+    '<div class="stat"><b>' + db.recipes.length + '</b>Total Recipes</div>' +
+    '<div class="stat"><b>' + db.requests.length + '</b>Total Requests</div>' +
+    '<div class="stat"><b>' + pending + '</b>Pending Requests</div>' +
+    '</div>' +
+    '<div class="box"><p>Welcome, ' + safe(getUser().name) + '! Use the menu above to manage users, requests and recipes, or view reports.</p></div>';
+}
+
+function showUsers() {
+  var html = '<h2>Manage Users</h2><div class="table-wrap"><table>' +
+             '<tr><th>Name</th><th>Email</th><th>Role</th><th>Recipes</th><th>Actions</th></tr>';
+  for (var i = 0; i < db.users.length; i++) {
+    var u = db.users[i];
+    var recipeCount = countWhere(db.recipes, function (r) { return r.userId === u.id; });
+    var actions = "";
+    if (u.id !== db.loggedIn) {   // admin cannot change or delete their own account
+      var newRole = (u.role === "admin") ? "user" : "admin";
+      actions = '<button class="btn small yellow" onclick="changeRole(' + u.id + ')">Make ' + newRole + '</button> ' +
+                '<button class="btn small" onclick="deleteUser(' + u.id + ')">Delete</button>';
+    } else {
+      actions = '<span class="muted">(you)</span>';
+    }
+    html += '<tr><td>' + safe(u.name) + '</td><td>' + safe(u.email) + '</td><td>' + u.role +
+            '</td><td>' + recipeCount + '</td><td>' + actions + '</td></tr>';
+  }
+  html += '</table></div>';
+  document.getElementById("app").innerHTML = html;
+}
+
+function changeRole(id) {
+  var u = db.users.find(function (x) { return x.id === id; });
+  u.role = (u.role === "admin") ? "user" : "admin";
+  saveData();
+  showUsers();
+}
+
+function deleteUser(id) {
+  if (!confirm("Delete this user and all their recipes and requests?")) return;
+  db.users = db.users.filter(function (u) { return u.id !== id; });
+  db.recipes = db.recipes.filter(function (r) { return r.userId !== id; });
+  db.requests = db.requests.filter(function (r) { return r.userId !== id; });
+  saveData();
+  showUsers();
+}
+
+function showManageRequests() {
+  var html = '<h2>Manage Requests</h2>';
+  if (db.requests.length === 0) html += '<p class="muted">No requests yet.</p>';
+  else {
+    html += '<div class="table-wrap"><table><tr><th>Dish</th><th>Requested by</th><th>Notes</th><th>Status</th><th>Change status</th></tr>';
+    for (var i = 0; i < db.requests.length; i++) {
+      var r = db.requests[i];
+      html += '<tr><td>' + safe(r.dish) + '</td><td>' + safe(userName(r.userId)) + '</td><td>' + safe(r.notes || "-") + '</td>' +
+              '<td><span class="status ' + r.status + '">' + r.status + '</span></td>' +
+              '<td><button class="btn small yellow" onclick="setStatus(' + r.id + ',\'Approved\')">Approve</button> ' +
+              '<button class="btn small" onclick="setStatus(' + r.id + ',\'Rejected\')">Reject</button></td></tr>';
+    }
+    html += '</table></div>';
+  }
+  document.getElementById("app").innerHTML = html;
+}
+
+function setStatus(id, status) {
+  var r = db.requests.find(function (x) { return x.id === id; });
+  r.status = status;
+  saveData();
+  showManageRequests();
+}
+
+function showReports() {
+  var maxCat = 1;
+  for (var i = 0; i < categories.length; i++) {
+    var c = countWhere(db.recipes, function (r) { return r.category === categories[i]; });
+    if (c > maxCat) maxCat = c;
+  }
+
+  var html = '<h2>Reports</h2>' +
+    '<div class="box"><h3>Recipes per category</h3>';
+  for (var j = 0; j < categories.length; j++) {
+    var cat = categories[j];
+    var n = countWhere(db.recipes, function (r) { return r.category === cat; });
+    html += '<div class="bar-row"><span class="label">' + cat + '</span>' +
+            '<div class="bar" style="width:' + (n / maxCat * 50) + '%; min-width:3px"></div><b>' + n + '</b></div>';
+  }
+  html += '</div>';
+
+  // Recipes per cuisine, with average cooking time
+  html += '<div class="box"><h3>Recipes per cuisine</h3><div class="table-wrap"><table>' +
+          '<tr><th>Cuisine</th><th>Recipes</th><th>Average time to make</th></tr>';
+  for (var a = 0; a < cuisines.length; a++) {
+    var cu = cuisines[a];
+    var cuisineRecipes = db.recipes.filter(function (r) { return r.cuisine === cu; });
+    html += '<tr><td>' + cu + '</td><td>' + cuisineRecipes.length + '</td><td>' + averageTime(cuisineRecipes) + '</td></tr>';
+  }
+  html += '<tr><td><b>All recipes</b></td><td><b>' + db.recipes.length + '</b></td><td><b>' + averageTime(db.recipes) + '</b></td></tr>';
+  html += '</table></div></div>';
+
+  // Recipes per time group
+  var totalRecipes = Math.max(1, db.recipes.length);
+  html += '<div class="box"><h3>Recipes by time taken</h3>';
+  for (var b = 0; b < timeGroups.length; b++) {
+    var tg = timeGroups[b];
+    var tn = countWhere(db.recipes, function (r) { return timeGroup(r.time) === tg; });
+    html += '<div class="bar-row"><span class="label" style="width:170px">' + tg + '</span>' +
+            '<div class="bar" style="width:' + (tn / totalRecipes * 40) + '%; min-width:3px"></div><b>' + tn + '</b></div>';
+  }
+  html += '</div>';
+
+  html += '<div class="box"><h3>Requests by status</h3>';
+  var statuses = ["Pending", "Approved", "Rejected"];
+  for (var k = 0; k < statuses.length; k++) {
+    var st = statuses[k];
+    var m = countWhere(db.requests, function (r) { return r.status === st; });
+    html += '<p><span class="status ' + st + '">' + st + '</span> ' + m + '</p>';
+  }
+  html += '</div>';
+
+  html += '<div class="box"><h3>Recipes shared by each user</h3><div class="table-wrap"><table><tr><th>User</th><th>Recipes</th></tr>';
+  for (var x = 0; x < db.users.length; x++) {
+    var user = db.users[x];
+    var total = countWhere(db.recipes, function (r) { return r.userId === user.id; });
+    html += '<tr><td>' + safe(user.name) + '</td><td>' + total + '</td></tr>';
+  }
+  html += '</table></div></div>';
+
+  html += '<button class="btn yellow" onclick="window.print()">Print report</button>';
+  document.getElementById("app").innerHTML = html;
+}
+
+/* ---------- START THE APP ---------- */
+draw();
+</script>
+</body>
+</html>
